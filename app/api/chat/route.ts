@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
+// Initialize the OpenAI client with proper configuration
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY || "",
 });
 
 export async function POST(request: Request) {
@@ -27,37 +28,66 @@ export async function POST(request: Request) {
     // Add system message to guide the AI
     const systemMessage = {
       role: "system",
-      content: `You are a helpful restaurant recommendation assistant. 
-      Extract the following information from the user's query:
-      - Type of food/cuisine they're looking for
-      - Location they want to search in
-      - Price range ($ for budget, $$ for moderate, $$$ for expensive, $$$$ for very expensive)
-      - Whether they want places that are open now
-      - Any specific requirements (dietary restrictions, atmosphere, etc.)
+      content: `You are a helpful restaurant recommendation assistant named Taster. 
+
+      When users ask about food or restaurants, respond with JSON format containing the essential details you can extract from their query.
+      Keep it simple - if they only mention food and location, that's perfectly fine.
       
-      Format your response as JSON with the following structure:
+      Format your response as JSON with this structure:
       {
-        "food": "extracted food type or cuisine",
-        "location": "extracted location",
-        "price": "extracted price range (1-4 dollar signs)",
-        "open_now": boolean,
-        "message": "a friendly response to the user"
+        "food": "type of food mentioned",
+        "location": "location mentioned",
+        "price": "$ to $$$$" (optional),
+        "open_now": boolean (optional),
+        "message": "a friendly response"
       }
       
-      If any information is missing, make a reasonable assumption based on the query.`
+      For general conversation (hi, hello, how are you), respond naturally without JSON.
+      
+      Examples:
+      - "pizza in new york" → Extract just food and location
+      - "expensive sushi in LA open now" → Include price and open_now
+      - "hi" → Respond conversationally`
     };
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [systemMessage, ...messages],
-      temperature: 0.7,
-    });
+    try {
+      console.log("Calling OpenAI API with messages:", JSON.stringify(messages));
+      
+      const response = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [systemMessage, ...messages],
+        temperature: 0.7,
+      });
+      
+      console.log("OpenAI API response received:", JSON.stringify(response.choices[0].message));
 
-    return NextResponse.json(response);
-  } catch (error) {
+      // Format the response to match what the client expects
+      return NextResponse.json({
+        choices: [
+          {
+            message: response.choices[0].message
+          }
+        ]
+      });
+    } catch (openaiError: any) {
+      console.error("OpenAI API error:", openaiError);
+      
+      // Return a more detailed error message
+      return NextResponse.json(
+        { 
+          error: "Error communicating with OpenAI API", 
+          details: openaiError.message || "Unknown error"
+        },
+        { status: 500 }
+      );
+    }
+  } catch (error: any) {
     console.error("Error in chat API:", error);
     return NextResponse.json(
-      { error: "Failed to process chat request" },
+      { 
+        error: "Failed to process chat request",
+        details: error.message || "Unknown error"
+      },
       { status: 500 }
     );
   }

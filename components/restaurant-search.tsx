@@ -61,17 +61,35 @@ export default function RestaurantSearch() {
       if (params.open_now) url += `&open_now=true`;
       if (params.radius) url += `&radius=${params.radius}`;
       
+      console.log("Fetching restaurants from:", url);
       const response = await fetch(url);
       
       if (!response.ok) {
-        throw new Error("Failed to fetch restaurants");
+        const errorData = await response.json().catch(() => ({}));
+        console.error("API Error Response:", response.status, errorData);
+        throw new Error(`Failed to fetch restaurants: ${response.status} ${response.statusText}`);
       }
       
       const data = await response.json();
+      console.log("Restaurant data received:", data);
+      
+      if (!data.businesses || !Array.isArray(data.businesses)) {
+        console.error("Invalid API response format:", data);
+        throw new Error("Received invalid data format from API");
+      }
+      
       setRestaurants(data.businesses || []);
+      
+      // Close chat interface when results are fetched
+      if (chatMode) {
+        // Add a small delay to allow the last message to be shown
+        setTimeout(() => {
+          setChatMode(false);
+        }, 1000);
+      }
     } catch (err) {
-      setError("Failed to fetch restaurants. Please try again.");
-      console.error(err);
+      console.error("Error in fetchRestaurants:", err);
+      setError(`Failed to fetch restaurants. Please try again. ${err instanceof Error ? err.message : ''}`);
     } finally {
       setIsLoading(false);
     }
@@ -102,40 +120,54 @@ export default function RestaurantSearch() {
       });
 
       if (!chatResponse.ok) {
-        throw new Error("Failed to get response from chat API");
+        const errorData = await chatResponse.json();
+        console.error("Chat API error:", errorData);
+        throw new Error(errorData.details || errorData.error || "Failed to get response from chat API");
       }
 
       const data = await chatResponse.json();
       
-      // Parse the AI response to extract structured data
-      let parsedResponse: QueryParams | null = null;
+      // Check if the response has the expected structure
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        console.error("Unexpected API response format:", data);
+        throw new Error("Received an invalid response format from the API");
+      }
+      
+      const content = data.choices[0].message.content;
+      
+      // Try to extract JSON from the response and get just the message
+      let messageToDisplay = content;
       try {
-        const content = data.choices[0].message.content;
-        // Try to extract JSON from the response
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          parsedResponse = JSON.parse(jsonMatch[0]);
+          const parsedResponse = JSON.parse(jsonMatch[0]);
+          console.log("Parsed JSON from response:", parsedResponse);
+          
+          // Use the message field from the JSON if it exists
+          if (parsedResponse.message) {
+            messageToDisplay = parsedResponse.message;
+          }
+          
+          // Only trigger a search if we have both food and location
+          if (parsedResponse && parsedResponse.food && parsedResponse.location) {
+            await fetchRestaurants({
+              food: parsedResponse.food,
+              location: parsedResponse.location,
+              price: parsedResponse.price,
+              open_now: parsedResponse.open_now
+            });
+          }
         }
       } catch (e) {
         console.error("Failed to parse AI response:", e);
       }
-
-      // Add AI response to chat
+      
+      // Add AI response to chat with the message only
       const assistantMessage: ChatMessage = {
         role: "assistant",
-        content: data.choices[0].message.content
+        content: messageToDisplay
       };
       setMessages(prev => [...prev, assistantMessage]);
-
-      // If we successfully parsed the response, trigger a search
-      if (parsedResponse && parsedResponse.food && parsedResponse.location) {
-        await fetchRestaurants({
-          food: parsedResponse.food,
-          location: parsedResponse.location,
-          price: parsedResponse.price,
-          open_now: parsedResponse.open_now
-        });
-      }
     } catch (error) {
       console.error("Error in chat:", error);
       setMessages(prev => [
@@ -176,7 +208,7 @@ export default function RestaurantSearch() {
     setMessages([
       {
         role: "assistant",
-        content: "Hi! I can help you find restaurants. Try something like 'Find me spicy food in Chicago' or 'Italian restaurants in New York open now'"
+        content: "Hi! Let's find you something good to eat!"
       }
     ]);
   };
@@ -205,7 +237,11 @@ export default function RestaurantSearch() {
       </div>
       
       <div className="search-container bg-white dark:bg-card border-2 border-primary rounded-xl overflow-hidden max-w-3xl mx-auto">
-        {!chatMode ? (
+        {/* Search form - always visible */}
+        <div className={cn(
+          "transition-all duration-300 ease-in-out",
+          chatMode ? "opacity-0 max-h-0 pointer-events-none" : "opacity-100 max-h-[500px]"
+        )}>
           <div className="flex items-center justify-between">
             <form onSubmit={handleSearch} className="flex flex-1 sm:flex-row">
               <div className="flex-1">
@@ -243,7 +279,13 @@ export default function RestaurantSearch() {
               </Button>
             </form>
           </div>
-        ) : (
+        </div>
+
+        {/* Chat interface */}
+        <div className={cn(
+          "transition-all duration-300 ease-in-out",
+          chatMode ? "opacity-100 max-h-[500px]" : "opacity-0 max-h-0 pointer-events-none overflow-hidden"
+        )}>
           <div className="flex flex-col">
             <div className="flex items-center justify-between p-3 bg-primary/10 border-b border-primary/20">
               <div className="flex items-center gap-2">
@@ -335,7 +377,7 @@ export default function RestaurantSearch() {
               </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       {error && (

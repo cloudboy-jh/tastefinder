@@ -9,6 +9,8 @@ export async function GET(request: Request) {
   const openNow = searchParams.get("open_now");
   const radius = searchParams.get("radius");
 
+  console.log("API Request params:", { food, location, price, openNow, radius });
+
   if (!food || !location) {
     return NextResponse.json(
       { error: "Food preference and location are required" },
@@ -20,6 +22,7 @@ export async function GET(request: Request) {
   const YELP_API_KEY = process.env.YELP_API_KEY;
 
   if (!YELP_API_KEY) {
+    console.error("Yelp API key is not configured");
     return NextResponse.json(
       { error: "Yelp API key is not configured" },
       { status: 500 }
@@ -48,6 +51,8 @@ export async function GET(request: Request) {
       queryUrl += `&radius=${radius}`;
     }
 
+    console.log("Calling Yelp API:", queryUrl);
+
     const response = await fetch(
       queryUrl,
       {
@@ -59,16 +64,19 @@ export async function GET(request: Request) {
     );
 
     if (!response.ok) {
-      throw new Error(`Yelp API responded with status: ${response.status}`);
+      const errorText = await response.text();
+      console.error(`Yelp API error (${response.status}):`, errorText);
+      throw new Error(`Yelp API responded with status: ${response.status} - ${errorText}`);
     }
 
     const data: YelpResponse = await response.json();
+    console.log("Yelp API response received with", data.businesses?.length || 0, "businesses");
     
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error fetching from Yelp API:", error);
     return NextResponse.json(
-      { error: "Failed to fetch restaurant data" },
+      { error: "Failed to fetch restaurant data", details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
